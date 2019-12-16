@@ -1,6 +1,7 @@
 ### Marketing Analytics in R
 
 
+
 Using Linear Regression to predict customer lifetime value
 
 Using logistic regression to predict customer churn
