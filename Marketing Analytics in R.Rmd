@@ -1,0 +1,322 @@
+---
+title: "Marketing Analytics in R"
+author: "Ching-Yung Chang"
+date: "12/11/2019"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r message = FALSE, warning = FALSE}
+library(readr)
+library(tidyverse)
+library(ggplot2)
+library(corrplot)
+```
+
+
+```{r message = FALSE, warning = FALSE}
+salesData <- read.csv("SalesData.csv")
+salesData2_4 <- read.csv("SalesData_Month2_to_4.csv")
+defaultData <- read_delim("DefaultData.csv", ";", escape_double = FALSE, trim_ws = TRUE)
+survivalData <- read.csv("SurvivalData.csv")
+newsData <- read.csv("newsData.csv")
+```
+
+
+```{r message = FALSE, warning = FALSE}
+# Structure of dataset
+str(salesData, give.attr = FALSE)
+
+# Visualization of correlations
+salesData %>% select_if(is.numeric) %>%
+  select(-id) %>%
+  cor() %>% 
+  corrplot()
+
+# Frequent stores
+ggplot(salesData) +
+    geom_boxplot(aes(x = mostFreqStore, y = salesThisMon))
+  
+# Preferred brand
+ggplot(salesData) +
+    geom_boxplot(aes(x = preferredBrand, y = salesThisMon))
+```
+
+
+```{r message = FALSE, warning = FALSE}
+# Model specification using lm
+salesSimpleModel <- lm(salesThisMon ~ salesLast3Mon, 
+                        data = salesData)
+
+# Looking at model summary
+summary(salesSimpleModel)
+```
+
+
+```{r message = FALSE, warning = FALSE}
+library(rms)
+
+# Estimating the full model
+salesModel1 <- lm(salesThisMon ~ . - id, 
+                 data = salesData)
+
+
+# Checking variance inflation factors
+vif(salesModel1)
+
+# Estimating new model by removing information on brand
+salesModel2 <- lm(salesThisMon ~ . - id - preferredBrand - nBrands, 
+                 data = salesData)
+
+# Checking variance inflation factors
+vif(salesModel2)
+```
+
+
+```{r message = FALSE, warning = FALSE}
+# getting an overview of new data
+summary(salesData2_4)
+
+# predicting sales
+predSales5 <- predict(salesModel2, newdata = salesData2_4)
+
+# calculating mean of future sales
+mean(predSales5, na.rm = FALSE)
+```
+
+
+```{r message = FALSE, warning = FALSE}
+# Summary of data
+summary(defaultData)
+
+# Look at data structure
+str(defaultData)
+
+# Analyze the balancedness of dependent variable
+ggplot(defaultData,aes(x = PaymentDefault)) +
+  geom_histogram(stat = "count")
+```
+
+
+```{r message = FALSE, warning = FALSE}
+# Build logistic regression model
+logitModelFull <- glm(PaymentDefault ~ limitBal + sex + education + marriage +
+                   age + pay1 + pay2 + pay3 + pay4 + pay5 + pay6 + billAmt1 + 
+                   billAmt2 + billAmt3 + billAmt4 + billAmt5 + billAmt6 + payAmt1 + 
+                   payAmt2 + payAmt3 + payAmt4 + payAmt5 + payAmt6, 
+                 family = binomial, data = defaultData)
+
+# Take a look at the model
+summary(logitModelFull)
+
+# Take a look at the odds
+coefsexp <- coef(logitModelFull) %>% 
+  exp() %>% 
+  round(2)
+coefsexp
+```
+
+
+```{r message = FALSE, warning = FALSE}
+library(MASS)
+# The old (full) model
+logitModelFull <- glm(PaymentDefault ~ limitBal + sex + education + marriage +
+                   age + pay1 + pay2 + pay3 + pay4 + pay5 + pay6 + billAmt1 + 
+                   billAmt2 + billAmt3 + billAmt4 + billAmt5 + billAmt6 + payAmt1 + 
+                   payAmt2 + payAmt3 + payAmt4 + payAmt5 + payAmt6, 
+                 family = binomial, defaultData)
+
+#Build the new model
+logitModelNew <- stepAIC(logitModelFull, trace = 0) 
+
+#Look at the model
+summary(logitModelNew) 
+
+# Save the formula of the new model (it will be needed for the out-of-sample part) 
+formulaLogit <- as.formula(summary(logitModelNew)$call)
+formulaLogit
+```
+
+
+```{r message = FALSE, warning = FALSE}
+library(SDMTools)
+
+# Make predictions using the full Model
+defaultData$predFull <- predict(logitModelFull, type = "response", na.action = na.exclude)
+
+# Construct the in-sample confusion matrix
+confMatrixModelFull <- confusion.matrix(defaultData$PaymentDefault, defaultData$predFull, threshold = 0.5)
+confMatrixModelFull
+
+# Calculate the accuracy for the full Model
+accuracyFull <- sum(diag(confMatrixModelFull)) / sum(confMatrixModelFull)
+accuracyFull
+```
+
+
+```{r message = FALSE, warning = FALSE}
+# Calculate the accuracy for 'logitModelNew'
+# Make prediction
+defaultData$predNew <- predict(logitModelNew, type = "response", na.action = na.exclude)
+
+# Construct the in-sample confusion matrix
+confMatrixModelNew <- confusion.matrix(defaultData$PaymentDefault, defaultData$predNew, threshold = 0.5)
+confMatrixModelNew
+
+# Calculate the accuracy...
+accuracyNew <- sum(diag(confMatrixModelNew)) / sum(confMatrixModelNew)
+accuracyNew
+
+# and compare it to the full model's accuracy
+accuracyFull
+```
+
+
+```{r message = FALSE, warning = FALSE}
+# Split data in train and test set
+set.seed(534381) 
+defaultData$isTrain <- rbinom(nrow(defaultData), 1, 0.66)
+train <- subset(defaultData, defaultData$isTrain == 1)
+test <- subset(defaultData, defaultData$isTrain == 0)
+
+logitTrainNew <- glm(formulaLogit, family = binomial, data = train) # Modeling  
+test$predNew <- predict(logitTrainNew, type = "response", newdata = test) # Predictions
+
+# Out-of-sample confusion matrix and accuracy
+confMatrixModelNew <- confusion.matrix(test$PaymentDefault, test$predNew, threshold = 0.3) 
+sum(diag(confMatrixModelNew)) / sum(confMatrixModelNew) # Compare this value to the in-sample accuracy
+```
+
+
+```{r message = FALSE, warning = FALSE}
+library(boot)
+# Accuracy function
+costAcc <- function(r, pi = 0) {
+  cm <- confusion.matrix(r, pi, threshold = 0.3)
+  acc <- sum(diag(cm)) / sum(cm)
+  return(acc)
+}
+
+# Cross validated accuracy for logitModelNew
+set.seed(534381)
+cv.glm(defaultData, logitModelNew, cost = costAcc, K = 6)$delta[1]
+```
+
+
+```{r message = FALSE, warning = FALSE}
+dataNextOrder <- survivalData[, c(1, 6)]
+
+ggplot(dataNextOrder) +
+  geom_histogram(aes(x = daysSinceFirstPurch, fill = factor(boughtAgain))) + # Different colours 
+  facet_grid( ~ boughtAgain) + # Separate plots for boughtAgain = 1 vs. 0
+  theme(legend.position = "none") # Don't show legend
+```
+
+
+```{r message = FALSE, warning = FALSE}
+# Create survival object
+survObj <- Surv(dataNextOrder$daysSinceFirstPurch, dataNextOrder$boughtAgain)
+
+# Look at structure
+str(survObj)
+```
+
+
+```{r message = FALSE, warning = FALSE}
+# Compute and print fit
+fitKMSimple <- survfit(survObj ~ 1)
+print(fitKMSimple)
+
+# Plot fit
+plot(fitKMSimple, conf.int = FALSE,
+     xlab = "Time since first purchase", ylab = "Survival function", main = "Survival function")
+
+# Compute fit with covariate
+fitKMCov <- survfit(survObj ~ voucher, data = survivalData)
+
+# Plot fit with covariate and add labels
+plot(fitKMCov, lty = 2:3,
+     xlab = "Time since first purchase", ylab = "Survival function", main = "Survival function")
+legend(90, .9, c("No", "Yes"), lty = 2:3)
+```
+
+
+```{r message = FALSE, warning = FALSE}
+# Determine distributions of predictor variables
+dd <- datadist(survivalData)
+options(datadist = "dd")
+
+# Compute Cox PH Model and print results
+fitCPH <- cph(Surv(daysSinceFirstPurch, boughtAgain) ~ shoppingCartValue + voucher + returned + gender,
+              data = survivalData, x = TRUE, y = TRUE, surv = TRUE)
+print(fitCPH)
+
+# Interpret coefficients
+exp(fitCPH$coefficients)
+
+# Plot results
+plot(summary(fitCPH), log = TRUE)
+```
+
+
+```{r message = FALSE, warning = FALSE}
+#load("NewsData.rdata")
+#write.csv(newsData, "newsData.csv")
+
+newsData_new <- newsData[, c("n_tokens_title", "n_tokens_content", "n_unique_tokens", "num_hrefs", "num_self_hrefs", "num_imgs", "num_videos", "num_keywords", "is_weekend", "kw_avg_min", "kw_avg_avg", "kw_avg_max", "average_token_length", "global_subjectivity", "global_sentiment_polarity", "global_rate_positive_words", "global_rate_negative_words", "avg_positive_polarity", "avg_negative_polarity", "title_subjectivity", "title_sentiment_polarity")]
+
+# Correlation structure:
+newsData_new %>% 
+  cor() %>% 
+  corrplot()
+```
+
+
+```{r message = FALSE, warning = FALSE}
+# Standardize data
+newsData_new <- newsData_new %>% 
+  scale() %>% 
+  as.data.frame()
+
+# Compute PCA
+pcaNews <- newsData_new %>% 
+  prcomp()
+
+# Eigenvalues
+pcaNews$sdev ^ 2
+```
+
+
+```{r message = FALSE, warning = FALSE}
+# Screeplot:
+screeplot(pcaNews)
+
+# Cumulative explained variance:
+summary(pcaNews)
+
+# Kaiser-Guttmann (number of components with eigenvalue larger than 1):
+sum(pcaNews$sdev ^ 2 > 1)
+```
+
+
+```{r message = FALSE, warning = FALSE}
+# Print loadings of the first component
+pcaNews$rotation[, 1] %>% round(2)
+
+# Print loadings of the first six components
+pcaNews$rotation[, 1:6] %>% round(2)
+```
+
+
+```{r message = FALSE, warning = FALSE}
+pcaNews %>% 
+  biplot(cex = 0.5)
+```
+
+
