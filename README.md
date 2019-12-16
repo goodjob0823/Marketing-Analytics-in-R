@@ -11,5 +11,5 @@ Using Survival Analysis to predict the time of next order or customer churn
 Using PCA to show important variables
 
 
- [Marketing Analytics in R.html](https://goodjob0823.github.io/Marketing-Analytics-in-R/Marketing Analytics in R.html)
+ [Marketing_Analytics_in_R.html](https://goodjob0823.github.io/Marketing-Analytics-in-R/Marketing_Analytics_in_R.html)
 
